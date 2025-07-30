@@ -39,11 +39,11 @@ def run_command(cmd_list, timeout=60, suppress_output=False):
         )
         return result
     except FileNotFoundError:
-        return subprocess.CompletedProcess(cmd_list, -1, stderr=f"错误：找不到命令 '{cmd_list[0]}'")
+        return subprocess.CompletedProcess(cmd_list, -1, stderr=f"エラー：コマンド '{cmd_list[0]}' が見つかりません")
     except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(cmd_list, -1, stderr=f"错误：命令执行超时 ({timeout}秒)")
+        return subprocess.CompletedProcess(cmd_list, -1, stderr=f"エラー：コマンドがタイムアウトしました ({timeout}秒)")
     except Exception as e:
-        return subprocess.CompletedProcess(cmd_list, -1, stderr=f"错误：执行命令时发生未知错误: {e}")
+        return subprocess.CompletedProcess(cmd_list, -1, stderr=f"エラー：コマンド実行中に不明なエラーが発生しました: {e}")
 
 
 # --- 辅助函数：安全删除文件 (同v3) ---
@@ -54,7 +54,7 @@ def safe_remove(filepath, lock, filename_for_log):
             os.remove(filepath)
     except OSError as e:
         with lock: 
-            print(f"  [{os.path.basename(filename_for_log)}] 警告：无法删除临时文件 '{os.path.basename(filepath)}'。错误: {e}")
+            print(f"  [{os.path.basename(filename_for_log)}] 警告：一時ファイル '{os.path.basename(filepath)}' を削除できませんでした。エラー: {e}")
 
 
 # --- 辅助函数：获取声道数 (同v3) ---
@@ -67,7 +67,7 @@ def get_audio_channels(filename, ffprobe_path, lock):
         try:
             return int(result.stdout.strip())
         except ValueError:
-             with lock: print(f"  [{os.path.basename(filename)}] 错误：无法从 ffprobe 输出 '{result.stdout.strip()}' 解析声道数。")
+             with lock: print(f"  [{os.path.basename(filename)}] エラー：ffprobeの出力 '{result.stdout.strip()}' からチャンネル数を解析できません。")
              return None
     else:
         return None
@@ -116,7 +116,7 @@ def get_stereo_peaks_via_split(filename, config, thread_id, lock):
     if peak_l is not None and peak_r is not None:
         return {'L': peak_l, 'R': peak_r}
     else:
-        with lock: print(f"  [{os.path.basename(filename)}] 错误：未能获取立体声峰值。")
+        with lock: print(f"  [{os.path.basename(filename)}] エラー：ステレオのピーク値を取得できませんでした。")
         return None
 
 
@@ -148,7 +148,7 @@ def process_file(filename, target_peak_db, config, print_lock):
         for f in all_temps:
             safe_remove(f, print_lock, filename)
 
-    log_message("开始处理 (v4 - 分声道归一化 + 静音删除)...")
+    log_message("処理を開始します (v4 - チャンネル別ノーマライズ + 無音削除)...")
     
     proceed_to_silence_removal = True # 标记是否继续
     normalization_applied = False
@@ -156,32 +156,32 @@ def process_file(filename, target_peak_db, config, print_lock):
     
     channels = get_audio_channels(filename, ffprobe_path, print_lock)
     if channels is None:
-        log_message("错误：无法确定声道数。跳过所有处理。")
+        log_message("エラー：チャンネル数を特定できません。すべての処理をスキップします。")
         cleanup_temps()
-        return {'status': 'error', 'filename': filename, 'message': '无法获取声道数'}
+        return {'status': 'error', 'filename': filename, 'message': 'チャンネル数を取得できません'}
 
     # --- 阶段 1: 归一化处理 ---
-    log_message("阶段 1: 检查归一化...")
+    log_message("ステップ 1: ノーマライズ処理の確認...")
     apply_gain = False
     ffmpeg_normalize_cmd = None
 
     # === 单声道归一化判断 ===
     if channels == 1:
-        log_message("  检测到单声道文件。正在检测峰值...")
+        log_message("  モノラルファイルを検出しました。ピークを検出中...")
         current_peak_db = get_mono_peak(filename, ffmpeg_path, print_lock)
         if current_peak_db is None:
-            log_message("  错误：无法检测单声道峰值。跳过所有处理。")
+            log_message("  エラー：モノラルのピークを検出できません。すべての処理をスキップします。")
             proceed_to_silence_removal = False
             cleanup_temps()
-            return {'status': 'error', 'filename': filename, 'message': '无法检测单声道峰值'}
+            return {'status': 'error', 'filename': filename, 'message': 'モノラルのピークを検出できません'}
         
-        log_message(f"    当前峰值: {current_peak_db:.2f} dB")
+        log_message(f"    現在のピーク: {current_peak_db:.2f} dB")
         gain_db = target_peak_db - current_peak_db
         gain_db_rounded = round(gain_db, 2)
-        log_message(f"    计算得到增益: {gain_db_rounded:.2f} dB")
+        log_message(f"    計算されたゲイン: {gain_db_rounded:.2f} dB")
         
         if abs(gain_db_rounded) < gain_tolerance:
-            log_message(f"    增益绝对值低于阈值 {gain_tolerance} dB。跳过归一化步骤。")
+            log_message(f"    ゲインの絶対値がしきい値 {gain_tolerance} dB 未満です。ノーマライズのステップをスキップします。")
         else:
             apply_gain = True
             gain_str = f"{gain_db_rounded:.2f}"
@@ -189,23 +189,23 @@ def process_file(filename, target_peak_db, config, print_lock):
 
     # === 立体声归一化判断 ===
     elif channels == 2:
-        log_message("  检测到立体声文件。正在检测峰值 (分离声道)...")
+        log_message("  ステレオファイルを検出しました。ピークを検出中 (チャンネル分離)...")
         stereo_peaks = get_stereo_peaks_via_split(filename, config, thread_id, print_lock)
         if stereo_peaks is None:
-            log_message("  错误：无法检测立体声峰值。跳过所有处理。")
+            log_message("  エラー：ステレオのピークを検出できません。すべての処理をスキップします。")
             proceed_to_silence_removal = False
             cleanup_temps() # get_stereo_peaks_via_split 会清理自己的临时文件
-            return {'status': 'error', 'filename': filename, 'message': '无法检测立体声峰值'}
+            return {'status': 'error', 'filename': filename, 'message': 'ステレオのピークを検出できません'}
 
-        log_message(f"    检测到峰值: 左 {stereo_peaks['L']:.2f} dB, 右 {stereo_peaks['R']:.2f} dB")
+        log_message(f"    検出されたピーク: 左 {stereo_peaks['L']:.2f} dB, 右 {stereo_peaks['R']:.2f} dB")
         gain_l = target_peak_db - stereo_peaks['L']
         gain_r = target_peak_db - stereo_peaks['R']
         gain_l_rounded = round(gain_l, 2)
         gain_r_rounded = round(gain_r, 2)
-        log_message(f"    计算得到增益: 左 {gain_l_rounded:.2f} dB, 右 {gain_r_rounded:.2f} dB")
+        log_message(f"    計算されたゲイン: 左 {gain_l_rounded:.2f} dB, 右 {gain_r_rounded:.2f} dB")
 
         if abs(gain_l_rounded) < gain_tolerance and abs(gain_r_rounded) < gain_tolerance:
-            log_message(f"    左右声道增益绝对值均低于阈值 {gain_tolerance} dB。跳过归一化步骤。")
+            log_message(f"    左右チャンネルのゲイン絶対値が共にしきい値 {gain_tolerance} dB 未満です。ノーマライズのステップをスキップします。")
         else:
             apply_gain = True
             gain_l_str = f"{gain_l_rounded:.2f}"
@@ -218,107 +218,107 @@ def process_file(filename, target_peak_db, config, print_lock):
 
     # === 不支持的声道数 ===
     else:
-        log_message(f"文件声道数为 {channels}，不支持。跳过所有处理。")
+        log_message(f"ファイルのチャンネル数は {channels} で、サポートされていません。すべての処理をスキップします。")
         proceed_to_silence_removal = False
         cleanup_temps()
-        return {'status': 'skipped', 'filename': filename, 'message': f'不支持的声道数: {channels}'}
+        return {'status': 'skipped', 'filename': filename, 'message': f'サポートされていないチャンネル数: {channels}'}
 
     # --- 执行归一化 (如果需要) ---
     if apply_gain and ffmpeg_normalize_cmd and proceed_to_silence_removal:
-        log_message("  需要归一化，正在应用增益...")
+        log_message("  ノーマライズが必要です。ゲインを適用中...")
         result_norm = run_command(ffmpeg_normalize_cmd, timeout=300)
         time.sleep(0.1) 
 
         if result_norm and result_norm.returncode == 0 and os.path.exists(temp_norm_filename):
-            log_message("    归一化成功。")
+            log_message("    ノーマライズ成功。")
             input_for_silence_removal = temp_norm_filename # 更新静音处理的输入文件
             normalization_applied = True
         else:
-            log_message(f"    错误：应用归一化增益失败 (返回码 {result_norm.returncode})。跳过后续静音删除。")
-            log_message(f"      FFmpeg输出: {result_norm.stderr[:500]}...")
+            log_message(f"    エラー：ノーマライズゲインの適用に失敗しました (リターンコード {result_norm.returncode})。後続の無音削除をスキップします。")
+            log_message(f"      FFmpeg出力: {result_norm.stderr[:500]}...")
             proceed_to_silence_removal = False
             cleanup_temps() # 清理所有临时文件
             # 归一化失败，文件未被修改，算作错误
-            return {'status': 'error', 'filename': filename, 'message': '归一化失败'}
+            return {'status': 'error', 'filename': filename, 'message': 'ノーマライズ失敗'}
 
     # --- 阶段 2: 执行尾部静音删除 ---
     if proceed_to_silence_removal:
-        log_message("阶段 2: 处理尾部静音删除...")
+        log_message("ステップ 2: 末尾の無音部分を削除しています...")
         silence_cmd = [
             ffmpeg_path, "-y",
             "-i", input_for_silence_removal, 
             "-af", f"silenceremove=start_periods=0:stop_periods=-1:stop_duration={config['silence_stop_duration']}:stop_threshold={config['silence_stop_threshold']}",
             temp_silence_filename
         ]
-        log_message(f"  执行静音删除到 '{os.path.basename(temp_silence_filename)}'...")
+        log_message(f"  '{os.path.basename(temp_silence_filename)}' へ無音削除を実行中...")
         process_silence = run_command(silence_cmd, timeout=300)
         time.sleep(0.1)
 
         if process_silence.returncode == 0 and os.path.exists(temp_silence_filename):
-            log_message("  静音删除处理成功，正在替换原始文件...")
+            log_message("  無音削除の処理が成功しました。元のファイルを置き換えています...")
             try:
                 shutil.move(temp_silence_filename, filename)
-                log_message("  文件已成功更新。")
+                log_message("  ファイルは正常に更新されました。")
                 # 清理归一化临时文件（如果之前生成了）
                 if normalization_applied:
                     safe_remove(temp_norm_filename, print_lock, filename)
                 
                 # 无论归一化是否执行，只要最终替换成功就算 processed
-                status_msg = "处理成功 (归一化+静音删除)" if normalization_applied else "处理成功 (仅静音删除或无操作)"
+                status_msg = "処理成功 (ノーマライズ+無音削除)" if normalization_applied else "処理成功 (無音削除のみ、または操作なし)"
                 return {'status': 'processed', 'filename': filename, 'message': status_msg} 
             except OSError as move_err:
-                log_message(f"  错误：无法替换最终文件。错误: {move_err}")
-                log_message(f"  临时文件 '{os.path.basename(temp_silence_filename)}' 可能已保留。")
+                log_message(f"  エラー：最終ファイルを置き換えられませんでした。エラー: {move_err}")
+                log_message(f"  一時ファイル '{os.path.basename(temp_silence_filename)}' が残っている可能性があります。")
                 cleanup_temps()
-                return {'status': 'error', 'filename': filename, 'message': f'替换最终文件失败: {move_err}'}
+                return {'status': 'error', 'filename': filename, 'message': f'最終ファイルの置き換えに失敗: {move_err}'}
         else:
-            log_message(f"  错误：执行静音删除失败 (返回码 {process_silence.returncode})。")
-            log_message(f"    FFmpeg输出: {process_silence.stderr[:500]}...")
+            log_message(f"  エラー：無音削除の実行に失敗しました (リターンコード {process_silence.returncode})。")
+            log_message(f"    FFmpeg出力: {process_silence.stderr[:500]}...")
             cleanup_temps()
             # 如果归一化成功但静音删除失败，文件停留在归一化状态，这不符合预期，算错误
             # 如果归一化跳过但静音删除失败，文件未变，也算错误
-            return {'status': 'error', 'filename': filename, 'message': '静音删除失败'}
+            return {'status': 'error', 'filename': filename, 'message': '無音削除に失敗'}
     else:
          # 如果因为之前的错误跳过了静音删除
-         log_message("因先前步骤失败或不支持，跳过静音删除。")
+         log_message("以前のステップでエラーが発生したか、サポートされていないため、無音削除をスキップしました。")
          # 状态已经在前面返回了，这里不需要额外操作
          pass
          # 安全起见，返回一个错误状态以防万一流程走到这里
          cleanup_temps()
-         return {'status': 'error', 'filename': filename, 'message': '处理流程异常中断'}
+         return {'status': 'error', 'filename': filename, 'message': '処理フローが異常終了しました'}
 
 # --- 主函数 (框架, 与v3基本相同, 只改标题和CONFIG) ---
 def main():
     """主处理逻辑，使用线程池并行处理文件"""
     print("======================================================")
-    print(" 音频处理脚本 v4 (分声道归一化+静音删除) - 多线程版")
+    print(" 音声処理スクリプト v4 (チャンネル別ノーマライズ+無音削除) - マルチスレッド版")
     print("======================================================")
     print()
     
-    target_peak_str = input(f"请输入目标峰值 (例如 -4.5): ") 
+    target_peak_str = input(f"目標ピーク値を入力してください (例: -4.5): ") 
     try:
         target_peak_db = float(target_peak_str)
     except ValueError:
-        print(f"错误：输入 '{target_peak_str}' 不是有效的数字。程序将退出。")
-        input("按 Enter 键退出...") 
+        print(f"エラー：入力 '{target_peak_str}' は有効な数値ではありません。プログラムを終了します。")
+        input("Enterキーを押して終了...") 
         return 
 
     if not shutil.which(CONFIG["ffprobe_path"]):
-         print(f"错误：找不到 ffprobe 命令 ('{CONFIG['ffprobe_path']}')。此脚本需要 ffprobe。")
-         input("按 Enter 键退出...")
+         print(f"エラー：ffprobe コマンド ('{CONFIG['ffprobe_path']}') が見つかりません。このスクリプトには ffprobe が必要です。")
+         input("Enterキーを押して終了...")
          return
 
     max_workers = CONFIG["max_workers"]
-    print(f"将使用 {max_workers} 个线程并行处理 (根据系统逻辑处理器数量自动设定)。")
+    print(f"{max_workers} 個のスレッドを使用して並列処理します (システムの論理プロセッサ数に基づいて自動設定)。")
     print("-" * 20) 
 
     all_files = glob.glob("*.wav")
     wav_files = [f for f in all_files if not os.path.basename(f).startswith(CONFIG["temp_prefix"])]
     if not wav_files:
-        print("当前目录下没有找到需要处理的 .wav 文件。")
-        input("按 Enter 键退出...") 
+        print("現在のディレクトリに処理対象の .wav ファイルが見つかりません。")
+        input("Enterキーを押して終了...") 
         return 
-    print(f"找到 {len(wav_files)} 个 .wav 文件准备处理...")
+    print(f"{len(wav_files)} 個の .wav ファイルが見つかりました。処理を開始します...")
 
     processed_count = 0
     skipped_count = 0 # v4 跳过的概念更复杂，主要是指因阈值跳过归一化
@@ -329,14 +329,14 @@ def main():
     try:
         # 清理残留
         for f in glob.glob(CONFIG["temp_prefix"] + "*.wav"):
-            safe_remove(f, print_lock, "启动清理")
+            safe_remove(f, print_lock, "起動時のクリーンアップ")
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for filename in wav_files:
                 future = executor.submit(process_file, filename, target_peak_db, CONFIG, print_lock)
                 futures.append(future)
             
-            print(f"已提交 {len(futures)} 个任务到线程池，开始处理...")
+            print(f"{len(futures)} 個のタスクをスレッドプールに投入し、処理を開始します...")
 
             for future in as_completed(futures):
                 try:
@@ -350,29 +350,29 @@ def main():
                 except Exception as exc:
                     error_count += 1
                     with print_lock:
-                         print(f"处理某个文件时发生未捕获的异常: {exc}") 
+                         print(f"ファイルの処理中に未捕捉の例外が発生しました: {exc}") 
 
     finally:
         # 最终清理
         print("-" * 20)
-        print("正在进行最终清理...")
+        print("最終クリーンアップを実行中...")
         final_cleaned_count = 0
         for temp_file in glob.glob(CONFIG["temp_prefix"] + "*.wav"):
-            safe_remove(temp_file, print_lock, "最终清理")
+            safe_remove(temp_file, print_lock, "最終クリーンアップ")
             final_cleaned_count += 1
         if final_cleaned_count > 0:
-             print(f"最终清理完成，删除了 {final_cleaned_count} 个残留临时文件。")
+             print(f"最終クリーンアップが完了し、{final_cleaned_count} 個の残り一時ファイルを削除しました。")
         else:
-             print("最终清理完成，未发现残留临时文件。")
+             print("最終クリーンアップが完了し、残り一時ファイルはありませんでした。")
 
     print("-" * 20)
-    print("所有文件处理完毕！")
+    print("すべてのファイルの処理が完了しました！")
     # V4 的 skipped 指的是因阈值跳过归一化(或声道不支持)
-    print(f"结果统计：成功处理 {processed_count} 个文件，跳过 {skipped_count} 个文件，发生错误 {error_count} 个文件。")
-    print("(注：'成功处理' 指整个流程完成，无论是否执行了归一化)")
+    print(f"結果：処理成功 {processed_count} ファイル、スキップ {skipped_count} ファイル、エラー {error_count} ファイル。")
+    print("(注：'処理成功' は、ノーマライズが実行されたかどうかに関わらず、プロセス全体が完了したことを意味します)")
 
 
 # --- 程序入口 ---
 if __name__ == "__main__":
     main()
-    input("按 Enter 键退出...") 
+    input("Enterキーを押して終了...") 
