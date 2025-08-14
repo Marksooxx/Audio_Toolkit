@@ -8,7 +8,8 @@ import shutil
 import sys
 import time 
 import threading 
-from concurrent.futures import ThreadPoolExecutor, as_completed 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path 
 
 # --- 配置 ---
 CONFIG = {
@@ -127,6 +128,7 @@ def main():
     print("=============================================")
     print(" 音声ノーマライズスクリプト v1 (基本ノーマライズ) - マルチスレッド版")
     print("=============================================")
+    print(f"現在の作業ディレクトリ: {Path.cwd()}")
     print()
     
     target_peak_str = input(f"目標ピーク値を入力してください (例: -1): ")

@@ -9,7 +9,8 @@ import sys
 import time 
 import threading 
 import math
-from concurrent.futures import ThreadPoolExecutor, as_completed 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path 
 
 # --- 配置 ---
 CONFIG = {
@@ -293,6 +294,7 @@ def main():
     print("======================================================")
     print(" 音声処理スクリプト v4 (チャンネル別ノーマライズ+無音削除) - マルチスレッド版")
     print("======================================================")
+    print(f"現在の作業ディレクトリ: {Path.cwd()}")
     print()
     
     target_peak_str = input(f"目標ピーク値を入力してください (例: -4.5): ") 
