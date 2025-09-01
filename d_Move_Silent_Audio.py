@@ -54,7 +54,7 @@ def detect_volume(file_path):
 
 def main():
     # 设置静音判断阈值（默认为 -60 dB，可根据需要调整）
-    threshold = -60.0
+    threshold = -80.0
     silent_folder = "SilentAudio"
     if not os.path.exists(silent_folder):
         os.makedirs(silent_folder)
