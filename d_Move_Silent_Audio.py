@@ -4,30 +4,8 @@
 import os
 import subprocess
 import re
-import win32api
-import win32con
-
-
-def add_long_path_prefix(path):
-    """
-    添加 \\?\ 前缀以支持长路径和 Unicode 文件名
-    """
-    if path.startswith('\\\\?\\'):
-        return path
-    return '\\\\?\\' + os.path.abspath(path)
-
-
-def move_file(src, dest):
-    """
-    使用 Windows API 移动文件（替换目标文件）
-    """
-    src_long = add_long_path_prefix(src)
-    dest_long = add_long_path_prefix(dest)
-    try:
-        win32api.MoveFileEx(src_long, dest_long, win32con.MOVEFILE_REPLACE_EXISTING)
-        print(f"移动成功: {src} -> {dest}")
-    except Exception as e:
-        print(f"移动失败: {src}\n错误: {e}")
+from pathlib import Path
+import shutil
 
 
 def detect_volume(file_path):
@@ -55,44 +33,47 @@ def detect_volume(file_path):
 def main():
     # 设置静音判断阈值（默认为 -60 dB，可根据需要调整）
     threshold = -80.0
-    silent_folder = "SilentAudio"
-    if not os.path.exists(silent_folder):
-        os.makedirs(silent_folder)
+    silent_folder = Path("SilentAudio")
+    silent_folder.mkdir(exist_ok=True)
 
     # 获取当前目录下的音频文件列表
     extensions = ('.wav', '.mp3', '.flac')
-    files = [f for f in os.listdir('.') if f.lower().endswith(extensions) and os.path.isfile(f)]
+    current_dir = Path('.')
+    files = [f for f in current_dir.iterdir() if f.is_file() and f.suffix.lower() in extensions]
     if not files:
         print("当前目录没有音频文件.")
         return
 
-    for file in files:
-        print(f"\n正在处理 {file} ...")
-        vol = detect_volume(file)
+    for file_path in files:
+        print(f"\n正在处理 {file_path.name} ...")
+        vol = detect_volume(str(file_path))
         move_decision = False
 
         if vol is None:
-            print(f"未检测到音量信息, 将 {file} 视为无声.")
+            print(f"未检测到音量信息, 将 {file_path.name} 视为无声.")
             move_decision = True
         elif vol.lower() == "-inf":
-            print(f"检测到无声音文件, {file} 的平均音量为: {vol}")
+            print(f"检测到无声音文件, {file_path.name} 的平均音量为: {vol}")
             move_decision = True
         else:
             try:
                 vol_value = float(vol)
-                print(f"{file} 的平均音量为: {vol_value} dB")
+                print(f"{file_path.name} 的平均音量为: {vol_value} dB")
                 if vol_value <= threshold:
-                    print(f"低于阈值 {threshold} dB, 将 {file} 视为无声.")
+                    print(f"低于阈值 {threshold} dB, 将 {file_path.name} 视为无声.")
                     move_decision = True
                 else:
-                    print(f"{file} 检测为有声音.")
+                    print(f"{file_path.name} 检测为有声音.")
             except ValueError:
                 print(f"无法解析音量数值: {vol}")
 
         if move_decision:
-            src_path = os.path.abspath(file)
-            dest_path = os.path.join(os.path.abspath(silent_folder), file)
-            move_file(src_path, dest_path)
+            dest_path = silent_folder / file_path.name
+            try:
+                shutil.move(str(file_path), dest_path)
+                print(f"移动成功: {file_path.name} -> {dest_path}")
+            except Exception as e:
+                print(f"移动失败: {file_path.name}\n错误: {e}")
 
     input("\n处理完成，按回车键退出...")
 
