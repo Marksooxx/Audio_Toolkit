@@ -254,9 +254,10 @@ def process_file(filename, target_peak_db, config, print_lock):
 def main():
     """主处理逻辑，使用线程池并行处理文件"""
     print("================================================")
-    print(" 音声処理スクリプト v3 (チャンネル別ノーマライズ) - マルチスレッド版")
+    print(" 音声処理スクリプト v3 (チャンネル別ノーマライズ) - args")
     print("================================================")
     print(f"現在の作業ディレクトリ: {Path.cwd()}")
+    print(f"当前已选择待处理文件：{len(sys.argv) - 1}个")
     print()
     
     target_peak_str = input(f"目標ピーク値を入力してください (例: -4.5): ") # 示例值更新
